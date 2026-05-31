@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Enroll — Euler Academy</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .enroll-wrap{max-width:680px;margin:2rem auto;padding:0 2rem}
+    .step-indicator{display:flex;align-items:center;gap:0;margin-bottom:2rem}
+    .step{display:flex;align-items:center;gap:8px}
+    .step-num{width:28px;height:28px;border-radius:50%;background:var(--light);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:var(--text-muted);flex-shrink:0}
+    .step.active .step-num{background:var(--accent);border-color:var(--accent);color:white}
+    .step.done .step-num{background:var(--success);border-color:var(--success);color:white}
+    .step-label{font-size:.8rem;font-weight:500;color:var(--text-muted)}
+    .step.active .step-label{color:var(--accent);font-weight:600}
+    .step-line{flex:1;height:2px;background:var(--border);margin:0 8px}
+    .slot-pick{padding:10px;border-radius:var(--radius-sm);border:1.5px solid var(--border);cursor:pointer;transition:all .15s;text-align:center}
+    .slot-pick:hover{border-color:var(--accent);background:var(--accent-light)}
+    .slot-pick.selected{border-color:var(--accent);background:var(--accent);color:white}
+    .slot-pick .sp-day{font-size:.7rem;font-weight:600;text-transform:uppercase;opacity:.8}
+    .slot-pick .sp-time{font-size:1rem;font-weight:700}
+    .success-screen{text-align:center;padding:3rem 1rem}
+    .success-screen .check{font-size:4rem;margin-bottom:1rem}
+    .success-screen h2{font-family:var(--font-display);font-size:1.8rem;font-weight:700;margin-bottom:.75rem;color:var(--success)}
+  </style>
+</head>
+<body>
+<div id="navbar-placeholder"></div>
+<div class="enroll-wrap">
+  <div style="margin-bottom:1.5rem">
+    <h1 style="font-family:var(--font-display);font-size:1.8rem;font-weight:700">Enroll a Student</h1>
+  </div>
+  <div class="step-indicator" id="step-indicator">
+    <div class="step active" id="step1"><div class="step-num">1</div><div class="step-label">Student Info</div></div>
+    <div class="step-line"></div>
+    <div class="step" id="step2"><div class="step-num">2</div><div class="step-label">Choose Teacher</div></div>
+    <div class="step-line"></div>
+    <div class="step" id="step3"><div class="step-num">3</div><div class="step-label">Choose Slot</div></div>
+  </div>
+  <div id="form-content"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/db.js"></script><script src="js/lang.js"></script><script src="js/ui.js"></script>
+<script>
+  let step=1, _subjects=[], _teachers=[], _allSlots=[];
+  const fd={parentName:'',studentName:'',studentAge:'',email:'',phone:'',notes:'',subjectId:'',teacherId:'',slotId:''};
+  const params=new URLSearchParams(location.search);
+  if(params.get('teacher')) fd.teacherId=params.get('teacher');
+
+  async function init(){
+    await waitForFirebase();
+    const [info,subjects,teachers,slots]=await Promise.all([SETTINGS_DB.get(),SUBJECTS_DB.getAll(),TEACHERS_DB.getAll(),SLOTS_DB.getAll()]);
+    _subjects=subjects; _teachers=teachers; _allSlots=slots;
+    document.getElementById('navbar-placeholder').innerHTML=buildNavbar('enroll',info.name);
+    renderStep();
+  }
+
+  function setStep(n){
+    step=n;
+    for(let i=1;i<=3;i++){const s=document.getElementById('step'+i);s.className='step'+(i<n?' done':i===n?' active':'');}
+    renderStep();
+  }
+
+  function renderStep(){
+    if(step===1) renderStep1();
+    else if(step===2) renderStep2();
+    else if(step===3) renderStep3();
+  }
+
+  function renderStep1(){
+    document.getElementById('form-content').innerHTML=`
+      <div class="card"><div class="card-body">
+        <div class="grid-2">
+          <div class="form-group"><label class="form-label">Parent / Guardian Name *</label><input class="form-control" id="f-parent" value="${fd.parentName}" placeholder="e.g. Tamar Beridze"></div>
+          <div class="form-group"><label class="form-label">Student Name *</label><input class="form-control" id="f-student" value="${fd.studentName}" placeholder="e.g. Luka Beridze"></div>
+          <div class="form-group"><label class="form-label">Student Age *</label><input class="form-control" type="number" id="f-age" value="${fd.studentAge}" min="4" max="30" placeholder="e.g. 12"></div>
+          <div class="form-group"><label class="form-label">Phone</label><input class="form-control" id="f-phone" value="${fd.phone}" placeholder="+995 555 ..."></div>
+        </div>
+        <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="f-email" value="${fd.email}" placeholder="your@email.com"></div>
+        <div class="form-group"><label class="form-label">Notes (optional)</label><textarea class="form-control" id="f-notes" placeholder="Any special requirements...">${fd.notes}</textarea></div>
+        <div style="text-align:right"><button class="btn btn-primary" onclick="s1Next()">Next →</button></div>
+      </div></div>`;
+  }
+
+  function s1Next(){
+    const p=document.getElementById('f-parent').value.trim();
+    const s=document.getElementById('f-student').value.trim();
+    const a=document.getElementById('f-age').value.trim();
+    if(!p||!s||!a){toast('Please fill in all required fields.','error');return;}
+    Object.assign(fd,{parentName:p,studentName:s,studentAge:a,email:document.getElementById('f-email').value.trim(),phone:document.getElementById('f-phone').value.trim(),notes:document.getElementById('f-notes').value.trim()});
+    setStep(2);
+  }
+
+  function renderStep2(){
+    const teachersBySubj=subj=>subj==='all'?_teachers:_teachers.filter(t=>t.subjectId===subj);
+    document.getElementById('form-content').innerHTML=`
+      <div class="card"><div class="card-body">
+        <div class="form-group"><label class="form-label">Choose Subject</label>
+          <select class="form-control" id="f-subj" onchange="onSubjChange()">
+            <option value="">-- All Subjects --</option>
+            ${_subjects.map(s=>`<option value="${s.id}" ${fd.subjectId===s.id?'selected':''}>${s.name}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label class="form-label">Choose Teacher</label>
+          <div id="teacher-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:1rem">
+          <button class="btn btn-ghost" onclick="setStep(1)">← Back</button>
+          <button class="btn btn-primary" onclick="s2Next()">Next →</button>
+        </div>
+      </div></div>`;
+    renderTeacherPick(fd.subjectId||'all');
+  }
+
+  function onSubjChange(){fd.subjectId=document.getElementById('f-subj').value;renderTeacherPick(fd.subjectId||'all');}
+
+  function renderTeacherPick(subj){
+    const list=subj==='all'?_teachers:_teachers.filter(t=>t.subjectId===subj);
+    document.getElementById('teacher-grid').innerHTML=list.map(t=>{
+      const s=_subjects.find(s=>s.id===t.subjectId);
+      const sc=_allSlots.filter(sl=>sl.teacherId===t.id).length;
+      const sel=fd.teacherId===t.id;
+      return `<div class="teacher-card ${sel?'selected':''}" id="tp-${t.id}" onclick="pickTeacher('${t.id}')"
+        style="${sel?'border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)':''}">
+        ${avatarEl(t.name,t.photo,56)}
+        <div class="t-name" style="font-size:.9rem">${t.name}</div>
+        <span class="badge badge-blue" style="font-size:.7rem">${sc} slots</span>
+      </div>`;
+    }).join('');
+  }
+
+  function pickTeacher(id){
+    fd.teacherId=id;
+    document.querySelectorAll('#teacher-grid .teacher-card').forEach(c=>{
+      const sel=c.id==='tp-'+id;
+      c.style.borderColor=sel?'var(--accent)':'';
+      c.style.boxShadow=sel?'0 0 0 3px var(--accent-light)':'';
+    });
+  }
+
+  function s2Next(){if(!fd.teacherId){toast('Please select a teacher.','error');return;}setStep(3);}
+
+  function renderStep3(){
+    const teacher=_teachers.find(t=>t.id===fd.teacherId);
+    const slots=_allSlots.filter(s=>s.teacherId===fd.teacherId);
+    const byDay={};DAYS.forEach(d=>byDay[d]=[]);
+    slots.forEach(s=>{if(byDay[s.day])byDay[s.day].push(s);});
+    let sHTML='';
+    DAYS.forEach(day=>{
+      const ds=byDay[day].sort((a,b)=>a.time.localeCompare(b.time));
+      if(!ds.length) return;
+      sHTML+=`<div style="margin-bottom:1rem">
+        <div style="font-size:.78rem;font-weight:600;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">${LANG.t(day)}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px">
+          ${ds.map(s=>`<div class="slot-pick ${fd.slotId===s.id?'selected':''}" id="sp-${s.id}" onclick="pickSlot('${s.id}')">
+            <div class="sp-day">${LANG.t(day)}</div>
+            <div class="sp-time">${s.time}</div>
+          </div>`).join('')}
+        </div></div>`;
+    });
+
+    document.getElementById('form-content').innerHTML=`
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header">
+          <span class="card-title">Choose Time Slot</span>
+          <span style="font-size:.85rem;color:var(--text-muted)">with ${teacher?.name||''}</span>
+        </div>
+        <div class="card-body">${sHTML||`<div class="empty-state"><div class="icon">📅</div><p>No slots available.</p></div>`}</div>
+      </div>
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header"><span class="card-title">Summary</span></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem 1.5rem">
+            <div><span style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase">Student</span><div style="font-weight:600">${fd.studentName} (${fd.studentAge}y)</div></div>
+            <div><span style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase">Parent</span><div style="font-weight:600">${fd.parentName}</div></div>
+            <div><span style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase">Teacher</span><div style="font-weight:600">${teacher?.name||''}</div></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <button class="btn btn-ghost" onclick="setStep(2)">← Back</button>
+        <button class="btn btn-success btn-lg" onclick="submitEnroll()">✓ Submit Enrollment</button>
+      </div>`;
+  }
+
+  function pickSlot(id){fd.slotId=id;document.querySelectorAll('.slot-pick').forEach(s=>s.classList.toggle('selected',s.id==='sp-'+id));}
+
+  async function submitEnroll(){
+    if(!fd.slotId){toast('Please choose a time slot.','error');return;}
+    showLoading('Submitting...');
+    try{
+      await ENROLL_DB.add({
+        parentName:fd.parentName,studentName:fd.studentName,studentAge:fd.studentAge,
+        email:fd.email,phone:fd.phone,notes:fd.notes,
+        teacherId:fd.teacherId,slotId:fd.slotId,subjectId:fd.subjectId
+      });
+      hideLoading();
+      document.getElementById('step-indicator').style.display='none';
+      document.getElementById('form-content').innerHTML=`
+        <div class="success-screen">
+          <div class="check">✅</div>
+          <h2>Enrollment Submitted!</h2>
+          <p style="color:var(--text-light);line-height:1.7">The admin will review and confirm your enrollment shortly.</p>
+          <div style="margin-top:2rem;display:flex;gap:1rem;justify-content:center">
+            <a href="index.html" class="btn btn-outline">Home</a>
+            <a href="teachers.html" class="btn btn-primary">View Teachers</a>
+          </div>
+        </div>`;
+    } catch(e){hideLoading();toast('Error submitting. Please try again.','error');console.error(e);}
+  }
+
+  init();
+</script>
+</body>
+</html>

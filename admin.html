@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Admin — Euler Academy</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="navbar-placeholder"></div>
+<div class="admin-layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main-area" id="main-area"></div>
+</div>
+
+<!-- Subject Modal -->
+<div class="modal-overlay" id="modal-subject">
+  <div class="modal">
+    <div class="modal-header"><h3 id="ms-title">Add Subject</h3><button class="modal-close" onclick="closeModal('modal-subject')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Subject Name (English)</label><input class="form-control" id="s-en" placeholder="e.g. Mathematics"></div>
+      <div class="form-group"><label class="form-label">Subject Name (Georgian)</label><input class="form-control" id="s-ka" placeholder="მაგ. მათემატიკა"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-subject')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSubject()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Teacher Modal -->
+<div class="modal-overlay" id="modal-teacher">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header"><h3 id="mt-title">Add Teacher</h3><button class="modal-close" onclick="closeModal('modal-teacher')">✕</button></div>
+    <div class="modal-body">
+      <div class="grid-2">
+        <div class="form-group"><label class="form-label">Full Name *</label><input class="form-control" id="t-name"></div>
+        <div class="form-group"><label class="form-label">Subject *</label><select class="form-control" id="t-subj"></select></div>
+        <div class="form-group"><label class="form-label">Login Email *</label><input class="form-control" type="email" id="t-email" placeholder="teacher@euler.ge"></div>
+        <div class="form-group"><label class="form-label">Login Password *</label><input class="form-control" id="t-pass" placeholder="Set teacher password"></div>
+        <div class="form-group"><label class="form-label">Phone</label><input class="form-control" id="t-phone"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Bio (English)</label><textarea class="form-control" id="t-bio-en"></textarea></div>
+      <div class="form-group"><label class="form-label">Bio (Georgian)</label><textarea class="form-control" id="t-bio-ka"></textarea></div>
+      <div class="form-group">
+        <label class="form-label">Photo</label>
+        <div class="upload-area" onclick="document.getElementById('t-photo-inp').click()">
+          <div id="t-photo-prev" style="font-size:2rem">📷</div>
+          <p>Click to upload (max 2MB)</p>
+          <input type="file" id="t-photo-inp" accept="image/*" style="display:none">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-teacher')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTeacher()">Save Teacher</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/db.js"></script><script src="js/lang.js"></script><script src="js/ui.js"></script>
+<script>
+  let page='overview', editSubjId=null, editTchId=null, tPhotoData='';
+
+  async function init(){
+    await waitForFirebase();
+    const saved=window._currentUser;
+    if(!saved||saved.role!=='admin'){window.location.href='login.html?role=admin';return;}
+    const info=await SETTINGS_DB.get();
+    document.getElementById('navbar-placeholder').innerHTML=buildNavbar('admin',info.name);
+    renderSidebar(); renderMain();
+  }
+
+  const PAGES=[
+    {id:'overview',icon:'📊',label:'Overview',section:'main'},
+    {id:'subjects',icon:'📚',label:'Subjects',section:'main'},
+    {id:'teachers',icon:'👨‍🏫',label:'Teachers',section:'main'},
+    {id:'enrollments',icon:'📋',label:'Enrollments',section:'main'},
+    {id:'settings',icon:'⚙️',label:'Site Settings',section:'settings'},
+  ];
+
+  function renderSidebar(){
+    let html='',lastSec='';
+    PAGES.forEach(p=>{
+      if(p.section!==lastSec){html+=`<div class="sidebar-section">${p.section==='settings'?'Settings':'Management'}</div>`;lastSec=p.section;}
+      html+=`<div class="sidebar-item ${page===p.id?'active':''}" onclick="nav('${p.id}')"><span class="icon">${p.icon}</span>${p.label}</div>`;
+    });
+    document.getElementById('sidebar').innerHTML=html;
+  }
+
+  function nav(p){page=p;renderSidebar();renderMain();}
+
+  async function renderMain(){
+    const area=document.getElementById('main-area');
+    area.innerHTML=`<div class="empty-state"><div class="icon">⏳</div><p>Loading...</p></div>`;
+    if(page==='overview') area.innerHTML=await renderOverview();
+    else if(page==='subjects') area.innerHTML=await renderSubjects();
+    else if(page==='teachers') area.innerHTML=await renderTeachers();
+    else if(page==='enrollments') area.innerHTML=await renderEnrollments();
+    else if(page==='settings'){area.innerHTML=await renderSettings();bindSettings();}
+    initTabs(area);
+  }
+
+  async function renderOverview(){
+    const [teachers,subjects,enrollments]=await Promise.all([TEACHERS_DB.getAll(),SUBJECTS_DB.getAll(),ENROLL_DB.getAll()]);
+    const pending=enrollments.filter(e=>e.status==='pending');
+    const approved=enrollments.filter(e=>e.status==='approved');
+    return `<h1 style="font-family:var(--font-display);font-size:1.6rem;font-weight:700;margin-bottom:1.5rem">Admin Dashboard</h1>
+    <div class="grid-4" style="margin-bottom:2rem">
+      ${sc('👨‍🏫',teachers.length,'Teachers','var(--accent-light)','var(--accent)')}
+      ${sc('📚',subjects.length,'Subjects','#dcfce7','#16a34a')}
+      ${sc('🎓',approved.length,'Students','#fef3c7','#d97706')}
+      ${sc('⏳',pending.length,'Pending','#fee2e2','#dc2626')}
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Recent Enrollments</span><button class="btn btn-ghost btn-sm" onclick="nav('enrollments')">View all</button></div>
+        <div style="padding:0">
+          ${enrollments.slice(0,5).map(e=>{
+            const t=teachers.find(t=>t.id===e.teacherId);
+            return `<div style="padding:12px 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+              <div><div style="font-weight:600;font-size:.9rem">${e.studentName}</div>
+              <div style="font-size:.78rem;color:var(--text-muted)">${t?.name||''}  · ${e.parentName}</div></div>
+              <span class="badge badge-${e.status==='approved'?'green':e.status==='rejected'?'red':'yellow'}">${e.status}</span>
+            </div>`;
+          }).join('')||'<div class="empty-state"><p>No enrollments yet.</p></div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Teachers by Subject</span></div>
+        <div style="padding:0">
+          ${subjects.map(s=>`<div style="padding:12px 1.5rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <span style="font-weight:500">${s.name}</span>
+            <span class="badge badge-blue">${teachers.filter(t=>t.subjectId===s.id).length} teachers</span>
+          </div>`).join('')||'<div class="empty-state"><p>No subjects yet.</p></div>'}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function sc(icon,val,label,bg,color){return `<div class="stat-card"><div class="stat-icon" style="background:${bg};color:${color}">${icon}</div><div class="stat-info"><div class="value" style="color:${color}">${val}</div><div class="label">${label}</div></div></div>`;}
+
+  async function renderSubjects(){
+    const subjects=await SUBJECTS_DB.getAll();
+    const teachers=await TEACHERS_DB.getAll();
+    return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem">
+      <h1 style="font-family:var(--font-display);font-size:1.5rem;font-weight:700">Manage Subjects</h1>
+      <button class="btn btn-primary" onclick="openAddSubj()">+ Add Subject</button>
+    </div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Subject</th><th>Georgian Name</th><th>Teachers</th><th>Actions</th></tr></thead>
+      <tbody>${subjects.map((s,i)=>`<tr>
+        <td style="color:var(--text-muted)">${i+1}</td>
+        <td><strong>${s.name}</strong></td>
+        <td>${s.nameKa||'—'}</td>
+        <td><span class="badge badge-blue">${teachers.filter(t=>t.subjectId===s.id).length}</span></td>
+        <td>
+          <button class="btn btn-ghost btn-sm" onclick='openEditSubj(${JSON.stringify(s)})'>✏️ Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="delSubject('${s.id}','${s.name}')">🗑</button>
+        </td>
+      </tr>`).join('')||'<tr><td colspan="5"><div class="empty-state"><p>No subjects yet.</p></div></td></tr>'}
+      </tbody>
+    </table></div></div>`;
+  }
+
+  function openAddSubj(){editSubjId=null;document.getElementById('ms-title').textContent='Add Subject';document.getElementById('s-en').value='';document.getElementById('s-ka').value='';openModal('modal-subject');}
+  function openEditSubj(s){editSubjId=s.id;document.getElementById('ms-title').textContent='Edit Subject';document.getElementById('s-en').value=s.name||'';document.getElementById('s-ka').value=s.nameKa||'';openModal('modal-subject');}
+  async function saveSubject(){
+    const name=document.getElementById('s-en').value.trim();const nameKa=document.getElementById('s-ka').value.trim();
+    if(!name){toast('Subject name required.','error');return;}
+    showLoading();
+    if(editSubjId) await SUBJECTS_DB.update(editSubjId,{name,nameKa});
+    else await SUBJECTS_DB.add({name,nameKa});
+    hideLoading();closeModal('modal-subject');toast('Subject saved!','success');renderMain();
+  }
+  function delSubject(id,name){confirmAction(`Delete subject "${name}"?`,async()=>{showLoading();await SUBJECTS_DB.delete(id);hideLoading();toast('Deleted.','success');renderMain();});}
+
+  async function renderTeachers(){
+    const [teachers,subjects]=await Promise.all([TEACHERS_DB.getAll(),SUBJECTS_DB.getAll()]);
+    const slots=await SLOTS_DB.getAll();
+    const enrollments=await ENROLL_DB.getAll();
+    return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem">
+      <h1 style="font-family:var(--font-display);font-size:1.5rem;font-weight:700">Manage Teachers</h1>
+      <button class="btn btn-primary" onclick="openAddTch()">+ Add Teacher</button>
+    </div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>Teacher</th><th>Subject</th><th>Email</th><th>Slots</th><th>Students</th><th>Actions</th></tr></thead>
+      <tbody>${teachers.map(t=>{
+        const subj=subjects.find(s=>s.id===t.subjectId);
+        const sc=slots.filter(s=>s.teacherId===t.id).length;
+        const enrolled=enrollments.filter(e=>e.teacherId===t.id&&e.status==='approved').length;
+        return `<tr>
+          <td><div style="display:flex;align-items:center;gap:10px">${avatarEl(t.name,t.photo,36)}<div><div style="font-weight:600">${t.name}</div></div></div></td>
+          <td><span class="badge badge-blue">${subj?.name||'—'}</span></td>
+          <td style="font-size:.8rem;color:var(--text-muted)">${t.email||'—'}</td>
+          <td><span class="badge badge-gray">${sc}</span></td>
+          <td><span class="badge badge-green">${enrolled}</span></td>
+          <td>
+            <a href="teacher-profile.html?id=${t.id}" class="btn btn-ghost btn-sm" target="_blank">👁</a>
+            <button class="btn btn-ghost btn-sm" onclick='openEditTch(${JSON.stringify({...t,photo:""}).replace(/'/g,"&#39;")})'>✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="delTeacher('${t.id}','${t.name}')">🗑</button>
+          </td>
+        </tr>`;
+      }).join('')||'<tr><td colspan="6"><div class="empty-state"><p>No teachers yet.</p></div></td></tr>'}
+      </tbody>
+    </table></div></div>`;
+  }
+
+  async function openAddTch(){
+    editTchId=null; tPhotoData='';
+    document.getElementById('mt-title').textContent='Add Teacher';
+    ['t-name','t-email','t-pass','t-phone','t-bio-en','t-bio-ka'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('t-photo-prev').innerHTML='📷';
+    const subjects=await SUBJECTS_DB.getAll();
+    document.getElementById('t-subj').innerHTML=subjects.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+    openModal('modal-teacher');
+    handleImageUpload(document.getElementById('t-photo-inp'),data=>{tPhotoData=data;document.getElementById('t-photo-prev').innerHTML=`<img src="${data}" style="width:80px;height:80px;border-radius:50%;object-fit:cover">`;});
+  }
+
+  async function openEditTch(t){
+    editTchId=t.id; tPhotoData='';
+    document.getElementById('mt-title').textContent='Edit Teacher';
+    document.getElementById('t-name').value=t.name||'';
+    document.getElementById('t-email').value=t.email||'';
+    document.getElementById('t-pass').value='';
+    document.getElementById('t-phone').value=t.phone||'';
+    document.getElementById('t-bio-en').value=t.bio?.en||'';
+    document.getElementById('t-bio-ka').value=t.bio?.ka||'';
+    const full=await TEACHERS_DB.get(t.id);
+    if(full?.photo) document.getElementById('t-photo-prev').innerHTML=`<img src="${full.photo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover">`;
+    else document.getElementById('t-photo-prev').innerHTML='📷';
+    const subjects=await SUBJECTS_DB.getAll();
+    document.getElementById('t-subj').innerHTML=subjects.map(s=>`<option value="${s.id}" ${s.id===t.subjectId?'selected':''}>${s.name}</option>`).join('');
+    openModal('modal-teacher');
+    handleImageUpload(document.getElementById('t-photo-inp'),data=>{tPhotoData=data;document.getElementById('t-photo-prev').innerHTML=`<img src="${data}" style="width:80px;height:80px;border-radius:50%;object-fit:cover">`;});
+  }
+
+  async function saveTeacher(){
+    const name=document.getElementById('t-name').value.trim();
+    const email=document.getElementById('t-email').value.trim();
+    const pass=document.getElementById('t-pass').value.trim();
+    const subjectId=document.getElementById('t-subj').value;
+    if(!name||!subjectId){toast('Name and subject are required.','error');return;}
+    showLoading('Saving teacher...');
+    try{
+      const data={name,subjectId,email,phone:document.getElementById('t-phone').value.trim(),
+        bio:{en:document.getElementById('t-bio-en').value.trim(),ka:document.getElementById('t-bio-ka').value.trim()}};
+      if(tPhotoData) data.photo=tPhotoData;
+
+      if(editTchId){
+        await TEACHERS_DB.update(editTchId,data);
+        // Update password if provided
+        if(pass){
+          // Update in users collection (teacher must re-login after password change)
+          // For password change we need Admin SDK — store new password hint in teacher doc
+          await TEACHERS_DB.update(editTchId,{passwordNote:`Password updated by admin: ${pass}`});
+          toast('Note: To change teacher password, use Firebase console → Authentication.','default');
+        }
+      } else {
+        if(!email||!pass){toast('Email and password required for new teacher.','error');hideLoading();return;}
+        // Create Firebase Auth user for this teacher
+        // We store teacher data first, then link via users collection
+        const tId=await TEACHERS_DB.add(data);
+        // Create a placeholder user record — teacher registers with email/pass through Firebase console
+        // OR you can manually create in Firebase Auth → Authentication → Add user
+        await TEACHERS_DB.update(tId,{loginEmail:email,loginNote:'Create this teacher in Firebase Auth: '+email+' / password: '+pass});
+        toast(`Teacher added! Now go to Firebase Console → Authentication → Add user: ${email} with password: ${pass}. Then in Firestore → users → create doc with uid from Auth, set role:"teacher", teacherId:"${tId}", name:"${name}"`, 'default');
+      }
+      hideLoading();closeModal('modal-teacher');renderMain();
+    }catch(e){hideLoading();toast('Error: '+e.message,'error');console.error(e);}
+  }
+
+  function delTeacher(id,name){
+    confirmAction(`Delete teacher "${name}"? This also removes their slots.`,async()=>{
+      showLoading();
+      // Delete slots
+      const slots=await SLOTS_DB.getAll();
+      await Promise.all(slots.filter(s=>s.teacherId===id).map(s=>SLOTS_DB.delete(s.id)));
+      await TEACHERS_DB.delete(id);
+      hideLoading();toast('Teacher deleted.','success');renderMain();
+    });
+  }
+
+  async function renderEnrollments(){
+    const [enrollments,teachers]=await Promise.all([ENROLL_DB.getAll(),TEACHERS_DB.getAll()]);
+    const slots=await SLOTS_DB.getAll();
+    const tabs=['all','pending','approved','rejected'];
+    return `<h1 style="font-family:var(--font-display);font-size:1.5rem;font-weight:700;margin-bottom:1.5rem">Enrollments</h1>
+    <div class="tabs">
+      ${tabs.map(t=>`<button class="tab-btn ${t==='all'?'active':''}" data-tab="enr-${t}">${t.charAt(0).toUpperCase()+t.slice(1)} (${t==='all'?enrollments.length:enrollments.filter(e=>e.status===t).length})</button>`).join('')}
+    </div>
+    ${tabs.map(t=>{
+      const list=t==='all'?enrollments:enrollments.filter(e=>e.status===t);
+      return `<div class="tab-pane ${t==='all'?'active':''}" id="enr-${t}">
+        <div class="card"><div class="table-wrap"><table>
+          <thead><tr><th>Student</th><th>Parent</th><th>Teacher</th><th>Slot</th><th>Contact</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>${list.map(e=>{
+            const tch=teachers.find(t=>t.id===e.teacherId);
+            const slot=slots.find(s=>s.id===e.slotId);
+            return `<tr>
+              <td><strong>${e.studentName}</strong> ${e.studentAge?`<span class="badge badge-gray">${e.studentAge}y</span>`:''}</td>
+              <td>${e.parentName}</td>
+              <td>${tch?.name||'—'}</td>
+              <td style="font-size:.85rem">${slot?`${slot.day} ${slot.time}`:'—'}</td>
+              <td style="font-size:.78rem;color:var(--text-muted)">${e.email||''}<br>${e.phone||''}</td>
+              <td><span class="badge badge-${e.status==='approved'?'green':e.status==='rejected'?'red':'yellow'}">${e.status}</span></td>
+              <td>
+                ${e.status==='pending'?`<button class="btn btn-success btn-sm" onclick="setStatus('${e.id}','approved')">✓</button>
+                <button class="btn btn-danger btn-sm" onclick="setStatus('${e.id}','rejected')">✕</button>`:''}
+                <button class="btn btn-ghost btn-sm" onclick="confirmAction('Delete enrollment?',()=>delEnroll('${e.id}'))">🗑</button>
+              </td>
+            </tr>`;
+          }).join('')||`<tr><td colspan="7"><div class="empty-state"><p>No ${t} enrollments.</p></div></td></tr>`}
+          </tbody>
+        </table></div></div>
+      </div>`;
+    }).join('')}`;
+  }
+
+  async function setStatus(id,status){showLoading();await ENROLL_DB.updateStatus(id,status);hideLoading();toast(status==='approved'?'Approved!':'Rejected.',status==='approved'?'success':'error');renderMain();}
+  async function delEnroll(id){showLoading();await ENROLL_DB.delete(id);hideLoading();toast('Deleted.','success');renderMain();}
+
+  async function renderSettings(){
+    const info=await SETTINGS_DB.get();
+    return `<h1 style="font-family:var(--font-display);font-size:1.5rem;font-weight:700;margin-bottom:1.5rem">Site Settings</h1>
+    <div class="grid-2">
+      <div>
+        <div class="card" style="margin-bottom:1.5rem">
+          <div class="card-header"><span class="card-title">Academy Info</span></div>
+          <div class="card-body">
+            <div class="form-group"><label class="form-label">Academy Name</label><input class="form-control" id="si-name" value="${info.name||''}"></div>
+            <div class="form-group"><label class="form-label">Tagline (English)</label><input class="form-control" id="si-tl-en" value="${info.tagline?.en||''}"></div>
+            <div class="form-group"><label class="form-label">Tagline (Georgian)</label><input class="form-control" id="si-tl-ka" value="${info.tagline?.ka||''}"></div>
+            <div class="form-group"><label class="form-label">Description (English)</label><textarea class="form-control" id="si-d-en">${info.description?.en||''}</textarea></div>
+            <div class="form-group"><label class="form-label">Description (Georgian)</label><textarea class="form-control" id="si-d-ka">${info.description?.ka||''}</textarea></div>
+            <div class="form-group"><label class="form-label">Address (English)</label><input class="form-control" id="si-a-en" value="${info.address?.en||''}"></div>
+            <div class="form-group"><label class="form-label">Address (Georgian)</label><input class="form-control" id="si-a-ka" value="${info.address?.ka||''}"></div>
+            <div class="form-group"><label class="form-label">Email</label><input class="form-control" id="si-email" type="email" value="${info.email||''}"></div>
+            <div class="form-group"><label class="form-label">Phone</label><input class="form-control" id="si-phone" value="${info.phone||''}"></div>
+            <button class="btn btn-primary" onclick="saveSettings()">Save Changes</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:1.5rem">
+          <div class="card-header"><span class="card-title">Cover Photo</span></div>
+          <div class="card-body">
+            ${info.coverImage?`<img src="${info.coverImage}" style="width:100%;border-radius:var(--radius);margin-bottom:1rem;aspect-ratio:16/9;object-fit:cover">`:''}
+            <div class="upload-area" onclick="document.getElementById('si-cover').click()">
+              <span style="font-size:2rem">🖼️</span><p>Click to upload cover photo (max 2MB)</p>
+              <input type="file" id="si-cover" accept="image/*" style="display:none">
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Add New Admin / Teacher Account</span></div>
+          <div class="card-body">
+            <div class="alert alert-info">To add admin or teacher login accounts, go to <strong>Firebase Console → Authentication → Add user</strong>. Then add a document in <strong>Firestore → users</strong> with fields: <code>role</code>, <code>name</code>, <code>teacherId</code>.</div>
+            <a href="https://console.firebase.google.com" target="_blank" class="btn btn-outline">Open Firebase Console</a>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function bindSettings(){
+    const coverIn=document.getElementById('si-cover');
+    if(coverIn) handleImageUpload(coverIn,async data=>{
+      const info=await SETTINGS_DB.get(); info.coverImage=data;
+      showLoading();await SETTINGS_DB.save(info);hideLoading();
+      toast('Cover photo saved!','success');renderMain();
+    });
+  }
+
+  async function saveSettings(){
+    showLoading();
+    await SETTINGS_DB.save({
+      name:document.getElementById('si-name').value.trim(),
+      tagline:{en:document.getElementById('si-tl-en').value.trim(),ka:document.getElementById('si-tl-ka').value.trim()},
+      description:{en:document.getElementById('si-d-en').value.trim(),ka:document.getElementById('si-d-ka').value.trim()},
+      address:{en:document.getElementById('si-a-en').value.trim(),ka:document.getElementById('si-a-ka').value.trim()},
+      email:document.getElementById('si-email').value.trim(),
+      phone:document.getElementById('si-phone').value.trim(),
+    });
+    hideLoading();toast('Settings saved!','success');
+  }
+
+  init();
+</script>
+</body>
+</html>

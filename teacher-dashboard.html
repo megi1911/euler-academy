@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Teacher Dashboard — Euler Academy</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .day-section{margin-bottom:1.5rem}
+    .day-label{font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em}
+    .meet-box{background:var(--accent-light);border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:8px 12px;margin-top:4px;font-size:.78rem}
+    .meet-box a{color:var(--accent);word-break:break-all}
+    .profile-mini{padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);margin-bottom:.5rem;text-align:center}
+    .student-row{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--border)}
+    .student-row:last-child{border-bottom:none}
+  </style>
+</head>
+<body>
+<div id="navbar-placeholder"></div>
+<div class="teacher-layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main-area" id="main-area"></div>
+</div>
+
+<!-- Add Slot Modal -->
+<div class="modal-overlay" id="modal-slot">
+  <div class="modal">
+    <div class="modal-header"><h3>Add Time Slot</h3><button class="modal-close" onclick="closeModal('modal-slot')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Day</label>
+        <select class="form-control" id="sl-day">
+          <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+          <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">Time</label><input class="form-control" type="time" id="sl-time" value="10:00"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-slot')">Cancel</button>
+      <button class="btn btn-primary" onclick="addSlot()">Add Slot</button>
+    </div>
+  </div>
+</div>
+
+<!-- Meet Link Modal -->
+<div class="modal-overlay" id="modal-meet">
+  <div class="modal">
+    <div class="modal-header"><h3>Google Meet Link</h3><button class="modal-close" onclick="closeModal('modal-meet')">✕</button></div>
+    <div class="modal-body">
+      <div class="alert alert-info">Students will see this link on your teacher profile page before the lesson.</div>
+      <div class="form-group"><label class="form-label">Date</label><input class="form-control" type="date" id="ml-date"></div>
+      <div class="form-group"><label class="form-label">Google Meet Link</label><input class="form-control" id="ml-link" placeholder="https://meet.google.com/abc-defg-hij"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-meet')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMeet()">Save Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- Photo Modal -->
+<div class="modal-overlay" id="modal-photo">
+  <div class="modal">
+    <div class="modal-header"><h3>Update My Photo</h3><button class="modal-close" onclick="closeModal('modal-photo')">✕</button></div>
+    <div class="modal-body">
+      <div class="upload-area" onclick="document.getElementById('my-photo-in').click()">
+        <div id="my-photo-prev" style="font-size:3rem">📷</div>
+        <p>Click to upload (max 2MB)</p>
+        <input type="file" id="my-photo-in" accept="image/*" style="display:none">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-photo')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePhoto()">Save Photo</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/db.js"></script><script src="js/lang.js"></script><script src="js/ui.js"></script>
+<script>
+  let page='slots', user=null, teacher=null, activeMeetSlotId=null, newPhoto='';
+
+  async function init(){
+    await waitForFirebase();
+    user=window._currentUser;
+    if(!user||user.role!=='teacher'){window.location.href='login.html?role=teacher';return;}
+    const [info,tch]=await Promise.all([SETTINGS_DB.get(),TEACHERS_DB.get(user.teacherId)]);
+    teacher=tch;
+    document.getElementById('navbar-placeholder').innerHTML=buildNavbar('teacher',info.name);
+    renderSidebar(); renderMain();
+    // Bind photo input
+    handleImageUpload(document.getElementById('my-photo-in'),data=>{newPhoto=data;document.getElementById('my-photo-prev').innerHTML=`<img src="${data}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">`;});
+  }
+
+  function renderSidebar(){
+    document.getElementById('sidebar').innerHTML=`
+      <div class="profile-mini">
+        ${avatarEl(teacher?.name||user.name,teacher?.photo,64)}
+        <div style="font-weight:600;font-size:.9rem;margin-top:.5rem">${teacher?.name||user.name}</div>
+      </div>
+      ${[['slots','📅','My Slots'],['students','🎓','My Students'],['profile','👤','My Profile']].map(([id,icon,label])=>`
+        <div class="sidebar-item ${page===id?'active':''}" onclick="nav('${id}')"><span>${icon}</span> ${label}</div>`).join('')}`;
+  }
+
+  function nav(p){page=p;renderSidebar();renderMain();}
+
+  async function renderMain(){
+    const area=document.getElementById('main-area');
+    area.innerHTML=`<div class="empty-state"><div class="icon">⏳</div><p>Loading...</p></div>`;
+    if(page==='slots') area.innerHTML=await renderSlots();
+    else if(page==='students') area.innerHTML=await renderStudents();
+    else if(page==='profile') area.innerHTML=renderProfile();
+  }
+
+  async function renderSlots(){
+    const slots=await SLOTS_DB.getByTeacher(user.teacherId);
+    const today=new Date().toISOString().split('T')[0];
+    const meetLinks=await MEET_DB.getByTeacher(user.teacherId);
+    const todayLinks={};
+    meetLinks.filter(m=>m.date===today).forEach(m=>todayLinks[m.slotId]=m.link);
+
+    const byDay={};DAYS.forEach(d=>byDay[d]=[]);
+    slots.forEach(s=>{if(byDay[s.day])byDay[s.day].push(s);});
+
+    let sHTML='';
+    DAYS.forEach(day=>{
+      const ds=byDay[day].sort((a,b)=>a.time.localeCompare(b.time));
+      if(!ds.length)return;
+      sHTML+=`<div class="day-section">
+        <div class="day-label">${LANG.t(day)}</div>
+        ${ds.map(s=>`<div class="slot-row">
+          <div>
+            <div style="font-weight:700">🕐 ${s.time}</div>
+            ${todayLinks[s.id]?`<div class="meet-box">📍 Today: <a href="${todayLinks[s.id]}" target="_blank">${todayLinks[s.id]}</a></div>`:`<div style="font-size:.75rem;color:var(--text-muted);margin-top:2px">No meet link for today</div>`}
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-outline btn-sm" onclick="openMeet('${s.id}')">📍 Meet Link</button>
+            <button class="btn btn-danger btn-sm" onclick="removeSlot('${s.id}')">✕</button>
+          </div>
+        </div>`).join('')}
+      </div>`;
+    });
+
+    return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem">
+      <div><h1 style="font-family:var(--font-display);font-size:1.5rem;font-weight:700">My Time Slots</h1>
+      <p style="color:var(--text-muted);font-size:.875rem">Manage your weekly schedule. Students see these and can book.</p></div>
+      <button class="btn btn-primary" onclick="openModal('modal-slot')">+ Add Slot</button>
+    </div>
+    <div class="card"><div class="card-body">
+      ${sHTML||`<div class="empty-state"><div class="icon">📅</div><p>No slots yet. Add your first time slot!</p></div>`}
+    </div></div>`;
+  }
+
+  async function addSlot(){
+    const day=document.getElementById('sl-day').value;
+    const time=document.getElementById('sl-time').value;
+    if(!time){toast('Please select a time.','error');return;}
+    const existing=await SLOTS_DB.getByTeacher(user.teacherId);
+    if(existing.find(s=>s.day===day&&s.time===time)){toast('This slot already exists!','error');return;}
+    showLoading();
+    await SLOTS_DB.add(user.teacherId,day,time);
+    hideLoading();closeModal('modal-slot');toast('Slot added!','success');renderMain();
+  }
+
+  function removeSlot(id){
+    confirmAction('Remove this time slot?',async()=>{showLoading();await SLOTS_DB.delete(id);hideLoading();toast('Slot removed.');renderMain();});
+  }
+
+  function openMeet(slotId){
+    activeMeetSlotId=slotId;
+    document.getElementById('ml-date').value=new Date().toISOString().split('T')[0];
+    document.getElementById('ml-link').value='';
+    openModal('modal-meet');
+  }
+
+  async function saveMeet(){
+    const date=document.getElementById('ml-date').value;
+    const link=document.getElementById('ml-link').value.trim();
+    if(!link){toast('Enter a meet link.','error');return;}
+    if(!link.startsWith('http')){toast('Please enter a valid URL starting with http.','error');return;}
+    showLoading();
+    await MEET_DB.save(user.teacherId,activeMeetSlotId,date,link);
+    hideLoading();closeModal('modal-meet');toast('Meet link saved!','success');renderMain();
+  }
+
+  async function renderStudents(){
+    const [enrollments,slots]=await Promise.all([ENROLL_DB.getByTeacher(user.teacherId),SLOTS_DB.getByTeacher(user.teacherId)]);
+    const today=new Date().toISOString().split('T')[0];
+    const meetLinks=await MEET_DB.getByTeacher(user.teacherId);
+    const todayLinks={};
+    meetLinks.filter(m=>m.date===today).forEach(m=>todayLinks[m.slotId]=m.link);
+
+    const byStatus={approved:[],pending:[],rejected:[]};
+    enrollments.forEach(e=>{if(byStatus[e.status])byStatus[e.status].push(e);});
+
+    return `<h1 style="font-family:var(--font-display);font-size:1.5rem;font-weight:700;margin-bottom:1.5rem">My Students</h1>
+    <div class="grid-3" style="margin-bottom:1.5rem">
+      ${[['approved','✓','success'],['pending','⏳','warning'],['rejected','✕','danger']].map(([s,ic,c])=>`
+        <div class="stat-card"><div class="stat-icon" style="background:var(--${c}-light);color:var(--${c})">${ic}</div>
+        <div class="stat-info"><div class="value" style="color:var(--${c})">${byStatus[s].length}</div><div class="label">${s.charAt(0).toUpperCase()+s.slice(1)}</div></div></div>`).join('')}
+    </div>
+    <div class="card"><div style="padding:0">
+      ${enrollments.map(e=>{
+        const slot=slots.find(s=>s.id===e.slotId);
+        const ml=slot?todayLinks[slot.id]:null;
+        return `<div class="student-row">
+          ${avatarEl(e.studentName,'',40)}
+          <div style="flex:1">
+            <div style="font-weight:600">${e.studentName} ${e.studentAge?`<span style="font-size:.75rem;color:var(--text-muted)">(${e.studentAge}y)</span>`:''}</div>
+            <div style="font-size:.78rem;color:var(--text-muted)">${e.parentName} · ${slot?`${slot.day} ${slot.time}`:'—'}</div>
+            ${e.email||e.phone?`<div style="font-size:.75rem;color:var(--text-muted)">${e.email||''} ${e.phone||''}</div>`:''}
+            ${e.notes?`<div style="font-size:.75rem;color:var(--text-muted);font-style:italic">"${e.notes}"</div>`:''}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span class="badge badge-${e.status==='approved'?'green':e.status==='rejected'?'red':'yellow'}">${e.status}</span>
+            ${ml&&e.status==='approved'?`<a href="${ml}" class="btn btn-outline btn-sm" target="_blank">📍 Join</a>`:''}
+          </div>
+        </div>`;
+      }).join('')||`<div class="empty-state"><div class="icon">🎓</div><p>No students yet.</p></div>`}
+    </div></div>`;
+  }
+
+  function renderProfile(){
+    const subjects_html=`<div class="form-group"><label class="form-label">Bio (English)</label><textarea class="form-control" id="my-bio-en">${teacher?.bio?.en||''}</textarea></div>
+    <div class="form-group"><label class="form-label">Bio (Georgian)</label><textarea class="form-control" id="my-bio-ka">${teacher?.bio?.ka||''}</textarea></div>
+    <button class="btn btn-primary" onclick="saveBio()">Save Bio</button>`;
+    return `<h1 style="font-family:var(--font-display);font-size:1.5rem;font-weight:700;margin-bottom:1.5rem">My Profile</h1>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Profile Photo</span></div>
+        <div class="card-body" style="text-align:center">
+          ${avatarEl(teacher?.name||user.name,teacher?.photo,100)}
+          <p style="margin-top:.75rem;font-size:.85rem;color:var(--text-muted)">This photo is shown to students</p>
+          <button class="btn btn-outline" style="margin-top:1rem" onclick="openModal('modal-photo')">📷 Change Photo</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Details</span></div>
+        <div class="card-body">
+          <div style="display:grid;gap:.75rem">
+            <div><span style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase">Name</span><div style="font-weight:600">${teacher?.name||''}</div></div>
+            <div><span style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase">Email</span><div>${teacher?.email||'—'}</div></div>
+            <div><span style="font-size:.75rem;color:var(--text-muted);text-transform:uppercase">Phone</span><div>${teacher?.phone||'—'}</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1.5rem">
+      <div class="card-header"><span class="card-title">Bio</span></div>
+      <div class="card-body">${subjects_html}</div>
+    </div>`;
+  }
+
+  async function saveBio(){
+    showLoading();
+    await TEACHERS_DB.update(user.teacherId,{bio:{en:document.getElementById('my-bio-en').value.trim(),ka:document.getElementById('my-bio-ka').value.trim()}});
+    hideLoading();toast('Bio updated!','success');
+  }
+
+  async function savePhoto(){
+    if(!newPhoto){toast('Please select a photo.','error');return;}
+    showLoading();
+    await TEACHERS_DB.update(user.teacherId,{photo:newPhoto});
+    teacher={...teacher,photo:newPhoto};
+    hideLoading();closeModal('modal-photo');toast('Photo updated!','success');renderSidebar();renderMain();
+  }
+
+  init();
+</script>
+</body>
+</html>

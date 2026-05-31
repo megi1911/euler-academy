@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Euler Academy</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .about-section { padding:4rem 2rem; background:var(--white); border-bottom:1px solid var(--border); }
+    .about-inner { max-width:1100px; margin:0 auto; display:grid; grid-template-columns:1.2fr 1fr; gap:3rem; align-items:center; }
+    .about-text h2 { font-family:var(--font-display); font-size:2rem; font-weight:700; margin-bottom:1rem; }
+    .about-text p { color:var(--text-light); line-height:1.8; margin-bottom:1rem; }
+    .about-img { border-radius:var(--radius-lg); overflow:hidden; aspect-ratio:4/3; background:var(--light); display:flex; align-items:center; justify-content:center; }
+    .about-img img { width:100%; height:100%; object-fit:cover; }
+    .teachers-section { padding:4rem 2rem; }
+    .teachers-section .section-header { text-align:center; margin-bottom:2.5rem; }
+    .teachers-section .section-header h2 { font-family:var(--font-display); font-size:2rem; font-weight:700; margin-bottom:.5rem; }
+    .filter-bar { display:flex; justify-content:center; gap:.5rem; flex-wrap:wrap; margin-bottom:2rem; }
+    .teachers-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:1.25rem; max-width:1100px; margin:0 auto; }
+    .cta-section { padding:4rem 2rem; background:linear-gradient(135deg,#f0f6ff,#f8f7f4); text-align:center; border-top:1px solid var(--border); }
+    .cta-section h2 { font-family:var(--font-display); font-size:2rem; font-weight:700; margin-bottom:.75rem; }
+    @media(max-width:768px){.about-inner{grid-template-columns:1fr}.about-img{order:-1}}
+  </style>
+</head>
+<body>
+<div id="navbar-placeholder"></div>
+
+<section class="hero">
+  <h1 class="hero-title" id="hero-title">Euler Academy</h1>
+  <p class="hero-subtitle" id="hero-sub"></p>
+  <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap">
+    <a href="teachers.html" class="btn btn-primary btn-lg">View Teachers</a>
+    <a href="enroll.html" class="btn btn-outline btn-lg">Enroll Now</a>
+  </div>
+</section>
+
+<div class="stats-row" id="stats-row">
+  <div class="stat-item"><div class="num">...</div><div class="lbl">Teachers</div></div>
+</div>
+
+<section class="about-section">
+  <div class="about-inner">
+    <div class="about-text">
+      <h2 id="about-title">About Us</h2>
+      <p id="about-desc"></p>
+      <div id="about-contact"></div>
+    </div>
+    <div class="about-img" id="about-img-wrap">
+      <div style="text-align:center;color:var(--text-muted)"><span style="font-size:3rem;display:block">🏫</span><p>Academy photo</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="teachers-section">
+  <div class="section-header">
+    <h2 id="teachers-heading">Our Teachers</h2>
+    <p id="teachers-sub">Choose a teacher and book your slot</p>
+  </div>
+  <div class="filter-bar" id="filter-bar"></div>
+  <div class="teachers-grid" id="teachers-grid">
+    <div class="empty-state" style="grid-column:1/-1"><div class="icon">⏳</div><p>Loading teachers...</p></div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <h2>Ready to start learning?</h2>
+  <p id="cta-sub"></p>
+  <a href="enroll.html" class="btn btn-primary btn-lg" style="margin-top:.5rem">Enroll Now</a>
+</section>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/db.js"></script>
+<script src="js/lang.js"></script>
+<script src="js/ui.js"></script>
+<script>
+  let _subjects = [], _teachers = [], _allTeachers = [], _activeSubj = 'all';
+
+  async function init() {
+    await waitForFirebase();
+    const [info, subjects, teachers] = await Promise.all([
+      SETTINGS_DB.get(), SUBJECTS_DB.getAll(), TEACHERS_DB.getAll()
+    ]);
+    _subjects = subjects; _teachers = teachers; _allTeachers = teachers;
+    renderPage(info, subjects, teachers);
+  }
+
+  function renderPage(info, subjects, teachers) {
+    const lang = LANG.current;
+    document.getElementById('navbar-placeholder').innerHTML = buildNavbar('home', info.name);
+    document.title = info.name || 'Euler Academy';
+
+    document.getElementById('hero-title').innerHTML =
+      `Learn Without Limits at <span>${info.name}</span>`;
+    document.getElementById('hero-sub').textContent = info.tagline?.[lang] || info.tagline?.en || '';
+    document.getElementById('about-title').textContent = LANG.t('aboutUs');
+    document.getElementById('about-desc').textContent = info.description?.[lang] || info.description?.en || '';
+    document.getElementById('cta-sub').textContent = info.tagline?.[lang] || '';
+
+    document.getElementById('about-contact').innerHTML = [
+      info.address?.[lang] ? `<p style="font-size:.85rem;color:var(--text-muted);margin-top:.5rem">📍 ${info.address[lang]}</p>` : '',
+      info.email ? `<p style="font-size:.85rem;color:var(--text-muted)">✉️ ${info.email}</p>` : '',
+      info.phone ? `<p style="font-size:.85rem;color:var(--text-muted)">📞 ${info.phone}</p>` : ''
+    ].join('');
+
+    if (info.coverImage)
+      document.getElementById('about-img-wrap').innerHTML = `<img src="${info.coverImage}" alt="Academy">`;
+
+    // Stats
+    document.getElementById('stats-row').innerHTML = `
+      <div class="stat-item"><div class="num">${teachers.length}+</div><div class="lbl">${LANG.t('totalTeachers')}</div></div>
+      <div class="stat-item"><div class="num">${subjects.length}+</div><div class="lbl">${LANG.t('totalSubjects')}</div></div>`;
+
+    // Filter bar
+    const fb = document.getElementById('filter-bar');
+    fb.innerHTML = `<button class="filter-btn ${_activeSubj==='all'?'active':''}" onclick="filterTeachers('all',this)">All</button>`
+      + subjects.map(s => `<button class="filter-btn ${_activeSubj===s.id?'active':''}" onclick="filterTeachers('${s.id}',this)">${s.name}</button>`).join('');
+
+    renderGrid(teachers);
+  }
+
+  function renderGrid(teachers) {
+    const grid = document.getElementById('teachers-grid');
+    if (!teachers.length) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="icon">👨‍🏫</div><p>No teachers yet.</p></div>`;
+      return;
+    }
+    grid.innerHTML = teachers.map(t => {
+      const subj = _subjects.find(s => s.id === t.subjectId);
+      return `<a href="teacher-profile.html?id=${t.id}" class="teacher-card">
+        ${avatarEl(t.name, t.photo, 80)}
+        <div class="t-name">${t.name}</div>
+        <div class="t-subject">${subj?.name||''}</div>
+        <span class="badge badge-blue" style="font-size:.7rem">${t.slotCount||0} slots</span>
+      </a>`;
+    }).join('');
+  }
+
+  function filterTeachers(id, btn) {
+    _activeSubj = id;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderGrid(id === 'all' ? _allTeachers : _allTeachers.filter(t => t.subjectId === id));
+  }
+
+  init();
+</script>
+</body>
+</html>

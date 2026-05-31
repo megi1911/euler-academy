@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Teacher — Euler Academy</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .profile-wrap{max-width:900px;margin:2rem auto;padding:0 2rem}
+    .profile-header{display:flex;align-items:flex-start;gap:2rem;margin-bottom:2rem}
+    .day-section{margin-bottom:1.5rem}
+    .day-label{font-size:.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:8px}
+    .slots-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+    .slot-item{padding:10px 12px;border-radius:var(--radius-sm);border:1.5px solid var(--border);text-align:center;font-weight:600;font-size:.9rem}
+    .meet-box{background:var(--accent-light);border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:10px 14px;margin-top:6px;font-size:.8rem}
+    .meet-box a{color:var(--accent);word-break:break-all}
+    .meet-box a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+<div id="navbar-placeholder"></div>
+<div class="profile-wrap">
+  <a href="teachers.html" class="btn btn-ghost btn-sm" style="margin-bottom:1.5rem">← Back</a>
+  <div id="profile-content"><div class="empty-state"><div class="icon">⏳</div><p>Loading...</p></div></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/db.js"></script><script src="js/lang.js"></script><script src="js/ui.js"></script>
+<script>
+  async function init() {
+    await waitForFirebase();
+    const params = new URLSearchParams(location.search);
+    const tid = params.get('id');
+    const [info, teacher, subjects, slots] = await Promise.all([
+      SETTINGS_DB.get(), TEACHERS_DB.get(tid), SUBJECTS_DB.getAll(), SLOTS_DB.getByTeacher(tid)
+    ]);
+    document.getElementById('navbar-placeholder').innerHTML = buildNavbar('teachers', info.name);
+
+    if (!teacher) {
+      document.getElementById('profile-content').innerHTML = `<div class="empty-state"><div class="icon">😕</div><p>Teacher not found.</p></div>`;
+      return;
+    }
+
+    document.title = teacher.name + ' — Euler Academy';
+    const subj = subjects.find(s => s.id === teacher.subjectId);
+    const today = new Date().toISOString().split('T')[0];
+
+    // Load today's meet links for this teacher
+    const meetLinks = await MEET_DB.getByTeacher(tid);
+    const todayLinks = {};
+    meetLinks.filter(m => m.date === today).forEach(m => todayLinks[m.slotId] = m.link);
+
+    // Group slots by day
+    const byDay = {};
+    DAYS.forEach(d => byDay[d] = []);
+    slots.forEach(s => { if (byDay[s.day]) byDay[s.day].push(s); });
+
+    let slotsHTML = '';
+    DAYS.forEach(day => {
+      const ds = byDay[day].sort((a,b) => a.time.localeCompare(b.time));
+      if (!ds.length) return;
+      slotsHTML += `<div class="day-section">
+        <div class="day-label">${LANG.t(day)}</div>
+        <div class="slots-grid">${ds.map(s => `
+          <div>
+            <div class="slot-item">🕐 ${s.time}</div>
+            ${todayLinks[s.id] ? `<div class="meet-box">📍 Today: <a href="${todayLinks[s.id]}" target="_blank">${todayLinks[s.id]}</a></div>` : ''}
+          </div>`).join('')}
+        </div>
+      </div>`;
+    });
+
+    const bio = teacher.bio?.[LANG.current] || teacher.bio?.en || '';
+    document.getElementById('profile-content').innerHTML = `
+      <div class="profile-header">
+        ${avatarEl(teacher.name, teacher.photo, 120)}
+        <div>
+          <h1 style="font-family:var(--font-display);font-size:1.8rem;font-weight:700;margin-bottom:4px">${teacher.name}</h1>
+          <div style="color:var(--text-muted);margin-bottom:.75rem">${subj?.name||''}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="badge badge-blue">${slots.length} time slots</span>
+          </div>
+          ${teacher.email?`<p style="font-size:.85rem;color:var(--text-muted);margin-top:8px">✉️ ${teacher.email}  📞 ${teacher.phone||''}</p>`:''}
+        </div>
+      </div>
+      ${bio?`<div class="card" style="margin-bottom:1.5rem"><div class="card-body"><p style="color:var(--text-light);line-height:1.8">${bio}</p></div></div>`:''}
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header">
+          <span class="card-title">Available Time Slots</span>
+          <a href="enroll.html?teacher=${tid}" class="btn btn-primary btn-sm">Enroll</a>
+        </div>
+        <div class="card-body">
+          ${slotsHTML||`<div class="empty-state"><div class="icon">📅</div><p>No slots available yet.</p></div>`}
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:2rem">
+        <a href="enroll.html?teacher=${tid}" class="btn btn-primary btn-lg">Enroll with ${teacher.name}</a>
+      </div>`;
+  }
+  init();
+</script>
+</body>
+</html>

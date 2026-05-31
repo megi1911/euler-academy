@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Login — Euler Academy</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body{display:flex;flex-direction:column;min-height:100vh}
+    .login-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:2rem}
+    .login-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:100%;max-width:420px;padding:2.5rem}
+    .logo{text-align:center;margin-bottom:2rem}
+    .logo-icon{width:56px;height:56px;background:var(--accent);border-radius:14px;display:inline-flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;color:white;margin-bottom:.75rem}
+    .role-tabs{display:grid;grid-template-columns:1fr 1fr;background:var(--light);border-radius:var(--radius-sm);padding:4px;margin-bottom:1.5rem}
+    .role-tab{padding:8px;border:none;background:transparent;border-radius:6px;font-family:var(--font-body);font-size:.875rem;font-weight:500;cursor:pointer;color:var(--text-muted);transition:all .2s}
+    .role-tab.active{background:var(--white);color:var(--accent);box-shadow:var(--shadow-sm);font-weight:600}
+    .hint{background:var(--light);border-radius:var(--radius-sm);padding:12px;margin-bottom:1rem;font-size:.78rem;color:var(--text-muted)}
+    .err{color:var(--danger);font-size:.85rem;margin-top:.5rem;display:none}
+  </style>
+</head>
+<body>
+<div id="navbar-placeholder"></div>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="logo">
+      <div class="logo-icon">E</div>
+      <h1 style="font-family:var(--font-display);font-size:1.6rem;font-weight:700" id="acad-name">Euler Academy</h1>
+      <p style="color:var(--text-muted);font-size:.875rem">Sign in to your account</p>
+    </div>
+    <div class="role-tabs">
+      <button class="role-tab active" id="tab-admin" onclick="switchRole('admin')">Admin</button>
+      <button class="role-tab" id="tab-teacher" onclick="switchRole('teacher')">Teacher</button>
+    </div>
+    <div class="hint" id="hint-box"></div>
+    <div id="login-form"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/db.js"></script><script src="js/lang.js"></script><script src="js/ui.js"></script>
+<script>
+  let role = 'admin';
+  const params = new URLSearchParams(location.search);
+  if (params.get('role') === 'teacher') role = 'teacher';
+
+  async function init() {
+    await waitForFirebase();
+    // If already logged in, redirect
+    const saved = window._currentUser;
+    if (saved?.role === 'admin') { window.location.href = 'admin.html'; return; }
+    if (saved?.role === 'teacher') { window.location.href = 'teacher-dashboard.html'; return; }
+    const info = await SETTINGS_DB.get();
+    document.getElementById('navbar-placeholder').innerHTML = buildNavbar('', info.name);
+    document.getElementById('acad-name').textContent = info.name || 'Euler Academy';
+    switchRole(role);
+  }
+
+  function switchRole(r) {
+    role = r;
+    document.getElementById('tab-admin').classList.toggle('active', r === 'admin');
+    document.getElementById('tab-teacher').classList.toggle('active', r === 'teacher');
+    if (r === 'admin') {
+      document.getElementById('hint-box').innerHTML = '🔑 Use your admin email and password set during Firebase setup.';
+      document.getElementById('login-form').innerHTML = `
+        <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="a-email" placeholder="admin@euleracademy.ge"></div>
+        <div class="form-group"><label class="form-label">Password</label><input class="form-control" type="password" id="a-pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doAdminLogin()"></div>
+        <div class="err" id="err-msg">Incorrect email or password.</div>
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="doAdminLogin()">Sign In as Admin</button>`;
+    } else {
+      document.getElementById('hint-box').innerHTML = '👤 Teachers log in with the email & password set by admin.';
+      document.getElementById('login-form').innerHTML = `
+        <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="t-email" placeholder="teacher@euleracademy.ge"></div>
+        <div class="form-group"><label class="form-label">Password</label><input class="form-control" type="password" id="t-pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doTeacherLogin()"></div>
+        <div class="err" id="err-msg">Incorrect credentials.</div>
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="doTeacherLogin()">Sign In as Teacher</button>`;
+    }
+  }
+
+  async function doAdminLogin() {
+    const email = document.getElementById('a-email').value.trim();
+    const pass = document.getElementById('a-pass').value;
+    if (!email || !pass) { document.getElementById('err-msg').style.display = 'block'; return; }
+    showLoading('Signing in...');
+    try {
+      const cred = await AUTH_DB.signIn(email, pass);
+      const userDoc = await USERS_DB.get(cred.user.uid);
+      if (!userDoc || userDoc.role !== 'admin') {
+        await AUTH_DB.signOut(); hideLoading();
+        document.getElementById('err-msg').textContent = 'This account is not an admin.';
+        document.getElementById('err-msg').style.display = 'block'; return;
+      }
+      saveUserSession({ uid: cred.user.uid, role: 'admin', name: userDoc.name || 'Admin' });
+      hideLoading();
+      window.location.href = 'admin.html';
+    } catch(e) {
+      hideLoading();
+      document.getElementById('err-msg').style.display = 'block';
+    }
+  }
+
+  async function doTeacherLogin() {
+    const email = document.getElementById('t-email').value.trim();
+    const pass = document.getElementById('t-pass').value;
+    if (!email || !pass) { document.getElementById('err-msg').style.display = 'block'; return; }
+    showLoading('Signing in...');
+    try {
+      const cred = await AUTH_DB.signIn(email, pass);
+      const userDoc = await USERS_DB.get(cred.user.uid);
+      if (!userDoc || userDoc.role !== 'teacher') {
+        await AUTH_DB.signOut(); hideLoading();
+        document.getElementById('err-msg').textContent = 'This account is not a teacher.';
+        document.getElementById('err-msg').style.display = 'block'; return;
+      }
+      saveUserSession({ uid: cred.user.uid, role: 'teacher', name: userDoc.name || 'Teacher', teacherId: userDoc.teacherId });
+      hideLoading();
+      window.location.href = 'teacher-dashboard.html';
+    } catch(e) {
+      hideLoading();
+      document.getElementById('err-msg').style.display = 'block';
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Teachers — Euler Academy</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .page-wrap{max-width:1100px;margin:0 auto;padding:2rem}
+    .teachers-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:1.5rem}
+    .filters{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:2rem}
+  </style>
+</head>
+<body>
+<div id="navbar-placeholder"></div>
+<div class="page-wrap">
+  <div style="margin-bottom:2rem">
+    <h1 style="font-family:var(--font-display);font-size:1.8rem;font-weight:700" id="page-title">Our Teachers</h1>
+    <p style="color:var(--text-muted)" id="page-sub">Choose a teacher and book your slot</p>
+  </div>
+  <div class="filters">
+    <div class="search-bar"><span>🔍</span><input type="text" id="search-input" placeholder="Search teachers..." oninput="filterTeachers()"></div>
+    <div id="subject-filters" style="display:flex;gap:.5rem;flex-wrap:wrap"></div>
+  </div>
+  <div class="teachers-grid" id="teachers-grid">
+    <div class="empty-state" style="grid-column:1/-1"><div class="icon">⏳</div><p>Loading...</p></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/db.js"></script><script src="js/lang.js"></script><script src="js/ui.js"></script>
+<script>
+  let _subjects=[], _teachers=[], _activeSubj='all';
+
+  async function init() {
+    await waitForFirebase();
+    const [info,subjects,teachers] = await Promise.all([SETTINGS_DB.get(),SUBJECTS_DB.getAll(),TEACHERS_DB.getAll()]);
+    _subjects=subjects; _teachers=teachers;
+    document.getElementById('navbar-placeholder').innerHTML = buildNavbar('teachers',info.name);
+    document.getElementById('page-title').textContent = LANG.t('ourTeachers');
+    document.getElementById('page-sub').textContent = LANG.t('chooseTeacher');
+    // Load slot counts
+    const allSlots = await SLOTS_DB.getAll();
+    _teachers.forEach(t => t.slotCount = allSlots.filter(s=>s.teacherId===t.id).length);
+    renderFilters(subjects);
+    filterTeachers();
+  }
+
+  function renderFilters(subjects) {
+    const sf = document.getElementById('subject-filters');
+    sf.innerHTML = `<button class="filter-btn ${_activeSubj==='all'?'active':''}" onclick="setSubject('all',this)">All</button>`
+      + subjects.map(s=>`<button class="filter-btn ${_activeSubj===s.id?'active':''}" onclick="setSubject('${s.id}',this)">${s.name}</button>`).join('');
+  }
+
+  function setSubject(id,btn){_activeSubj=id;document.querySelectorAll('#subject-filters .filter-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');filterTeachers();}
+
+  function filterTeachers() {
+    const q=document.getElementById('search-input').value.toLowerCase();
+    let list=_teachers;
+    if(_activeSubj!=='all') list=list.filter(t=>t.subjectId===_activeSubj);
+    if(q) list=list.filter(t=>t.name.toLowerCase().includes(q));
+    const grid=document.getElementById('teachers-grid');
+    if(!list.length){grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="icon">👨‍🏫</div><p>${LANG.t('noData')}</p></div>`;return;}
+    grid.innerHTML=list.map(t=>{
+      const subj=_subjects.find(s=>s.id===t.subjectId);
+      const bio=t.bio?.[LANG.current]||t.bio?.en||'';
+      return `<a href="teacher-profile.html?id=${t.id}" class="teacher-card">
+        ${avatarEl(t.name,t.photo,80)}
+        <div class="t-name">${t.name}</div>
+        <div class="t-subject">${subj?.name||''}</div>
+        ${bio?`<p style="font-size:.78rem;color:var(--text-light);line-height:1.5;text-align:left">${bio.slice(0,100)}${bio.length>100?'...':''}</p>`:''}
+        <span class="badge badge-blue">${t.slotCount||0} slots</span>
+        <button class="btn btn-primary btn-sm" style="width:100%;margin-top:.25rem">View Profile</button>
+      </a>`;
+    }).join('');
+  }
+
+  init();
+</script>
+</body>
+</html>
