@@ -86,16 +86,23 @@
     await waitForFirebase();
     user=window._currentUser;
     if(!user||user.role!=='teacher'){window.location.href='login.html?role=teacher';return;}
-    
-    // If teacherId missing in session, reload from Firestore
-    if(!user.teacherId) {
+
+    // Always reload from Firestore to get latest teacherId
+    try {
       const userDoc = await USERS_DB.get(user.uid);
-      if(userDoc?.teacherId) {
+      if(userDoc && userDoc.teacherId) {
         user.teacherId = userDoc.teacherId;
+        user.name = userDoc.name || user.name;
         saveUserSession(user);
       }
+    } catch(e){ console.error('reload error:', e); }
+
+    if(!user.teacherId){
+      document.getElementById('navbar-placeholder').innerHTML=buildNavbar('teacher','Euler Academy');
+      document.getElementById('main-area').innerHTML='<div class="empty-state"><div class="icon">⚠️</div><p>teacherId not set. Contact admin. UID: '+user.uid+'</p></div>';
+      renderSidebar(); return;
     }
-    
+
     const [info,tch]=await Promise.all([SETTINGS_DB.get(),TEACHERS_DB.get(user.teacherId)]);
     teacher=tch;
     document.getElementById('navbar-placeholder').innerHTML=buildNavbar('teacher',info.name);
