@@ -113,8 +113,9 @@
         document.getElementById('err-msg').textContent = 'This account is not a teacher.';
         document.getElementById('err-msg').style.display = 'block'; return;
       }
-      saveUserSession({ uid: cred.user.uid, role: 'teacher', name: userDoc.name || 'Teacher', teacherId: userDoc.teacherId });
+      saveUserSession({ uid: cred.user.uid, role: 'teacher', name: userDoc.name || 'Teacher', teacherId: userDoc.teacherId || '' });
       hideLoading();
+      console.log('Teacher session saved:', userDoc.teacherId);
       window.location.href = 'teacher-dashboard.html';
     } catch(e) {
       hideLoading();

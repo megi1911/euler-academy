@@ -86,11 +86,20 @@
     await waitForFirebase();
     user=window._currentUser;
     if(!user||user.role!=='teacher'){window.location.href='login.html?role=teacher';return;}
+    
+    // If teacherId missing in session, reload from Firestore
+    if(!user.teacherId) {
+      const userDoc = await USERS_DB.get(user.uid);
+      if(userDoc?.teacherId) {
+        user.teacherId = userDoc.teacherId;
+        saveUserSession(user);
+      }
+    }
+    
     const [info,tch]=await Promise.all([SETTINGS_DB.get(),TEACHERS_DB.get(user.teacherId)]);
     teacher=tch;
     document.getElementById('navbar-placeholder').innerHTML=buildNavbar('teacher',info.name);
     renderSidebar(); renderMain();
-    // Bind photo input
     handleImageUpload(document.getElementById('my-photo-in'),data=>{newPhoto=data;document.getElementById('my-photo-prev').innerHTML=`<img src="${data}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">`;});
   }
 
