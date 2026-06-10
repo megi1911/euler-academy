@@ -87,19 +87,25 @@
     user=window._currentUser;
     if(!user||user.role!=='teacher'){window.location.href='login.html?role=teacher';return;}
 
-    // Always reload from Firestore to get latest teacherId
+    // Always reload from Firestore using uid
     try {
-      const userDoc = await USERS_DB.get(user.uid);
-      if(userDoc && userDoc.teacherId) {
-        user.teacherId = userDoc.teacherId;
-        user.name = userDoc.name || user.name;
+      const snap = await firebase.firestore().collection('users').doc(user.uid).get();
+      if(snap.exists) {
+        const data = snap.data();
+        console.log('User doc from Firestore:', JSON.stringify(data));
+        user.teacherId = data.teacherId || '';
+        user.name = data.name || user.name;
         saveUserSession(user);
+      } else {
+        console.error('No user doc found for uid:', user.uid);
       }
-    } catch(e){ console.error('reload error:', e); }
+    } catch(e){ console.error('Firestore reload error:', e); }
+
+    console.log('teacherId after reload:', user.teacherId);
 
     if(!user.teacherId){
       document.getElementById('navbar-placeholder').innerHTML=buildNavbar('teacher','Euler Academy');
-      document.getElementById('main-area').innerHTML='<div class="empty-state"><div class="icon">⚠️</div><p>teacherId not set. Contact admin. UID: '+user.uid+'</p></div>';
+      document.getElementById('main-area').innerHTML='<div class="empty-state"><div class="icon">⚠️</div><p>teacherId not found. UID: '+user.uid+'</p></div>';
       renderSidebar(); return;
     }
 
